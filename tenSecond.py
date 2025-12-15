@@ -1,3 +1,5 @@
+import math
+
 INSTRUCTIONS = open('10-input.txt').read().splitlines()
 
 def read_instruction(instruction):
@@ -16,108 +18,107 @@ def read_instruction(instruction):
             continue
     return indicators, buttons, joltages
 
-def process_loop(buttons, machine_joltages_tmp, counter, valid, joltages, used_button, best=None, memo={}):
-    # Shared best-known solution for pruning. best is a single-element list [value].
-    if best is None:
-        best = [float('inf')]
-    
-    if tuple(machine_joltages_tmp) in memo.keys():
-        if counter >= memo[tuple(machine_joltages_tmp)][0] and frozenset(used_button) == memo[tuple(machine_joltages_tmp)][1]:
-            return valid, memo
-    
-    memo[tuple(machine_joltages_tmp)] = (counter, frozenset(used_button))
+def create_possibilities(buttons, depth, estimate=0):
+    possibilities = []
+    for i in range(buttons[0][1]+1):
+        if estimate + i <= buttons[0][1]:
+            if depth > 0:
+                for possibility in create_possibilities(buttons, depth-1, estimate+i):
+                    possibilities.append([i]+possibility)
+            else:
+                possibilities.append([i])
+        else:
+            break
+    return possibilities
 
-    # If current counter already exceeds known best, prune this branch.
-    if counter >= best[0]:
-        return valid, memo
+def analyse_loop(joltages, buttons, m_joltages, counter=0, possible_counter_tmp=[], depth=0):
+    machine_joltages = m_joltages[:]
+    possible_counter = possible_counter_tmp[:]
 
-    max_presses = []
-    for button in buttons:
-        if button in used_button:
+    while True:
+        max_presses = []
+        for button in buttons:
+            lowest = float('inf')
+            lowest_joltage = None
+            for j in button:
+                if joltages[j] - machine_joltages[j] == 0:
+                    lowest = float('inf')
+                    break
+                elif joltages[j] - machine_joltages[j] < lowest and joltages[j] - machine_joltages[j] > 0:
+                    lowest = joltages[j] - machine_joltages[j]
+                    lowest_joltage = j
+            if lowest != float('inf'):
+                max_presses.append((button, lowest, lowest_joltage))
+        max_presses = sorted(max_presses, key=lambda x: x[1])
+
+        if not max_presses:
+            if tuple(machine_joltages) == joltages:
+                possible_counter.append(counter)
+            if possible_counter:
+                return sorted(possible_counter)[0]
+            else:
+                return float('inf')
+        if len(max_presses) == 1 or max_presses[0][1] != max_presses[1][1]:
+            for j in max_presses[0][0]:
+                machine_joltages[j] += max_presses[0][1]
+            counter += max_presses[0][1]
+        else:
+            break
+
+    next_buttons = []
+    next_joltage = max_presses[0][2]
+    for button in max_presses:
+        if button[2] == next_joltage:
+            next_buttons.append(button)
+
+    possibilities_tmp = create_possibilities(next_buttons, len(next_buttons)-1)
+
+    possibilities = []
+    for possibility in possibilities_tmp:
+        if len(possibility) == len(next_buttons):
+            if sum(possibility) == next_buttons[0][1]:
+                possibilities.append(possibility[:])
+
+    for number, possibility in enumerate(possibilities):
+        if depth == 0:
+            print(number, '/', len(possibilities))
+        machine_joltages_tmp = machine_joltages[:]
+        for i, button in enumerate(next_buttons):
+            for j in button[0]:
+                machine_joltages_tmp[j] += possibility[i]
+            counter += possibility[i]
+
+        if tuple(machine_joltages_tmp) == joltages:
+            possible_counter.append(counter)
             continue
-        lowest = (float('inf'), 0)
-        for j in button:
-            if joltages[j] - machine_joltages_tmp[j] == 0:
-                lowest = (float('inf'), 0)
-                break
-            elif joltages[j] - machine_joltages_tmp[j] < lowest[0] and joltages[j] - machine_joltages_tmp[j] > 0:
-                lowest = (joltages[j] - machine_joltages_tmp[j], j)
-        max_presses.append((button, lowest[0], lowest[1]))
-    max_presses = sorted(max_presses, key=lambda x: x[1])
-    new_valid = valid[:]
-    #print(max_presses, used_button)
-    if not max_presses:
-        return new_valid, memo
-    # For each available button, try pressing it 0..lowest times and recurse
-    for btn, lowest_val, _idx in max_presses:
-        if lowest_val == float('inf'):
+        elif sum(machine_joltages_tmp) > sum(joltages):
             continue
-        for i in range(lowest_val + 1):
-            new_counter = counter
-            new_machine_joltages_tmp = machine_joltages_tmp[:]
-            for j in btn:
-                new_machine_joltages_tmp[j] += i
-            new_counter += i
-            # prune if we've already exceeded best
-            if new_counter >= best[0]:
-                continue
+        else:
+            p_counter = analyse_loop(joltages, buttons, machine_joltages_tmp, counter, possible_counter, depth=depth+1)
+            possible_counter += [p_counter]
 
-            new_valid = process_loop(buttons, new_machine_joltages_tmp, new_counter, new_valid, joltages, used_button + [btn], best, memo=memo)
-            # if applying i presses already reaches the target, record that cost
-            if tuple(new_machine_joltages_tmp) == joltages:
-                new_valid.append(new_counter)
-                if new_counter < best[0]:
-                    best[0] = new_counter
-        break
-    if tuple(machine_joltages_tmp) == joltages:
-        print(new_valid)
-        new_valid.append(counter)
-    return new_valid, memo
+    return sorted(possible_counter)[0]
 
 def process_instructions(instructions):
-    global one
     processed_instructions = []
     for instruction in instructions:
         indicators, buttons, joltages = read_instruction(instruction)
-        
+
         machine_joltages = []
         for _ in range(len(joltages)):
             machine_joltages.append(0)
         
-        counter = 0
-        while True:
-            max_presses = []
-            for button in buttons:
-                lowest = (float('inf'), 0)
-                for j in button:
-                    if joltages[j] - machine_joltages[j] == 0:
-                        lowest = (float('inf'), 0)
-                        break
-                    elif joltages[j] - machine_joltages[j] < lowest[0] and joltages[j] - machine_joltages[j] > 0:
-                        lowest = (joltages[j] - machine_joltages[j], j)
-                max_presses.append((button, lowest[0], lowest[1]))
-            
-            max_presses = sorted(max_presses, key=lambda x: x[1])
+        possible_counter = analyse_loop(joltages, buttons, machine_joltages)
+        print(possible_counter, len(joltages))
+        input()
 
-            if max_presses[0][1] == max_presses[1][1]:
-                break
-            else:
-                for j in max_presses[0][0]:
-                    machine_joltages[j] += max_presses[0][1]
-                counter += max_presses[0][1]
-                
-        #print(max_presses, counter)
-        valid = []
-        valid = process_loop(buttons, machine_joltages, counter, valid, joltages, [])
-
-        processed_instructions.append(sorted(valid, key=lambda x: x)[0])
-        print(processed_instructions[-1])
+        processed_instructions.append(possible_counter)
             
-    return processed_instructions
+    return sorted(processed_instructions)
 
 def main():
     processed = process_instructions(INSTRUCTIONS)
-    total = sum(int(x) for x in processed)
+    total = sum(int(x[1]) for x in processed)
     return total
 
 if __name__ == "__main__":
